@@ -60,12 +60,36 @@ channel = OFDMChannel(
 def compute_channel_gain(bs_positions, mn_positions):
     """Compute channel gains based on distance, path loss, fading, and shadowing."""
     print("Computing channel gains...")
-    # Calculate distance between BS and MN
-    
-    # Compute path loss
-    # Apply fading and shadowing
-    # Return channel gain values
-    pass  # Students to implement
+    # shape[0] gives the number of rows, which is the number of base stations
+    total_bs = bs_positions.shape[0]
+    # Number of mobile nodes
+    total_mn = mn_positions.shape[0]
+    channel_gains = np.zeros((total_bs, total_mn))
+
+    for i in range(total_bs):
+        for j in range(total_mn):
+            # Calculate distance between BS and MN
+            distance = np.linalg.norm(bs_positions[i] - mn_positions[j])
+
+            # Compute path loss
+            # TODO: 确定计算方法
+            # path_loss = 20 * np.log10(distance) + 20 * np.log10(CARRIER_FREQ) - 147.55
+            path_loss = (distance * CARRIER_FREQ) ** 2
+
+            # Apply fading (Rayleigh fading)
+            # scale=1.0 is a standard Rayleigh distribution
+            fading = np.random.rayleigh(scale=1.0)
+
+            # Apply shadowing (log-normal shadowing)
+            # scale=2.0 is a reasonable empirical choice.
+            #TODO: 为什么loc=0.0
+            shadowing = np.random.normal(loc=0.0, scale=2.0)
+
+            # Compute channel gain
+            # 10 * np.log10(fading) converts fading to dB
+            channel_gains[i, j] = -path_loss + 10 * np.log10(fading) + shadowing
+
+    return channel_gains
 
 # Compute SINR values
 
@@ -73,7 +97,7 @@ def compute_channel_gain(bs_positions, mn_positions):
 def compute_sinr(channel_gain, power_bs, noise_power):
     """Compute SINR based on received signal power, interference, and noise."""
     print("Computing SINR...")
-    # Calculate signal power for each MN from assigned BS
+    # Calculate signal power for each MN from assigned BS  
     # Compute interference power from other BSs
     # Calculate SINR for each MN-BS pair
     # Return SINR values
