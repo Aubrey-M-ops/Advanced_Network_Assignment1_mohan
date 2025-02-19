@@ -8,6 +8,8 @@ import tensorflow as tf
 from sionna.channel.tr38901 import TDL
 from sionna.ofdm import ResourceGrid
 from sionna.channel import OFDMChannel
+import gurobipy as gp
+from gurobipy import GRB
 
 # Simulation Parameters
 NUM_BS = 3  # Number of base stations
@@ -71,23 +73,21 @@ def compute_channel_gain(bs_positions, mn_positions):
             # Calculate distance between BS and MN
             distance = np.linalg.norm(bs_positions[i] - mn_positions[j])
 
-            # Compute path loss
-            # TODO: 确定计算方法
-            # path_loss = 20 * np.log10(distance) + 20 * np.log10(CARRIER_FREQ) - 147.55
-            path_loss = (distance * CARRIER_FREQ) ** 2
+            # Compute path loss using log-distance path loss model
+            path_loss = 20 * np.log10(distance) + 20 * np.log10(CARRIER_FREQ)
 
             # Apply fading (Rayleigh fading)
             # scale=1.0 is a standard Rayleigh distribution
-            fading = np.random.rayleigh(scale=1.0)
+            fading = np.random.rayleigh(scale=1.0, size=(total_bs, total_mn))
 
             # Apply shadowing (log-normal shadowing)
             # scale=2.0 is a reasonable empirical choice.
-            #TODO: 为什么loc=0.0
-            shadowing = np.random.normal(loc=0.0, scale=2.0)
+            shadowing = np.random.normal(
+                loc=0.0, scale=2.0, size=(total_bs, total_mn))
 
             # Compute channel gain
             # 10 * np.log10(fading) converts fading to dB
-            channel_gains[i, j] = -path_loss + 10 * np.log10(fading) + shadowing
+            channel_gains[i, j] = -path_loss + fading + shadowing
 
     return channel_gains
 
@@ -97,23 +97,66 @@ def compute_channel_gain(bs_positions, mn_positions):
 def compute_sinr(channel_gain, power_bs, noise_power):
     """Compute SINR based on received signal power, interference, and noise."""
     print("Computing SINR...")
-    # Calculate signal power for each MN from assigned BS  
-    # Compute interference power from other BSs
-    # Calculate SINR for each MN-BS pair
-    # Return SINR values
-    pass  # Students to implement
+    total_bs, total_mn = channel_gain.shape
+    sinr = np.zeros((total_bs, total_mn))
+
+    for j in range(total_mn):
+        for i in range(total_bs):
+            # Calculate signal power for each MN from assigned BS
+            signal_power = power_bs * channel_gain[i, j]
+            # Compute interference power from other BSs
+            interference_power = np.sum(
+                [power_bs * channel_gain[k, j] for k in range(total_bs) if k != i])
+            # Calculate SINR for each MN-BS pair
+            sinr[i, j] = signal_power / (noise_power + interference_power)
+
+    return sinr
 
 # Optimization Problem using Gurobi
 
 
-def optimize_throughput():
+def optimize_throughput(bs_positions, mn_positions, sinr):
     """Formulate and solve an optimization problem to maximize throughput."""
     print("Setting up optimization problem...")
-    # Define decision variables
-    # Define constraints (assignment, SINR constraints, binary constraints)
-    # Set the objective function
-    # Solve the optimization problem
-    pass  # Students to implement
+    model = gp.Model("Throughput Maximization")
+    total_bs = bs_positions.shape[0]
+    total_mn = mn_positions.shape[0]
+    # 1️⃣ Define decision variables
+    # Create a 2D matrix of binary variables a[i, j] for assignment
+    a = model.addVars(total_bs, total_mn, vtype=GRB.BINARY, name="a")
+
+    # 2️⃣ Define constraints (assignment, SINR constraints, binary constraints)
+    # Constraint 1 (assignment): Each mobile node can only be assigned to one base station
+    for j in range(total_mn):
+        model.addConstr(gp.quicksum(a[i, j] for i in range(
+            total_bs)) == 1, name=f"assign_mn_{j}")
+    # Constraint 2(SINR constraint): Ensure assigned mobile nodes meet the minimum SINR threshold
+    for i in range(total_bs):
+        for j in range(total_mn):
+            model.addConstr(a[i, j] * sinr[i, j] >= SINR_MIN,
+                            name=f"SINR_constraint_{i}_{j}")
+    # Constraint 3(Binary constraint): Association variable must be binary (0 or 1)
+    # This is handled implicitly by vtype=GRB.BINARY
+
+    # 3️⃣ Set the objective function
+    model.setObjective(
+        gp.quicksum(a[i, j] * np.log2(1 + sinr[i, j])
+                    for i in range(total_bs) for j in range(total_mn)),
+        GRB.MAXIMIZE
+    )
+    # 4️⃣ Solve the optimization problem
+    model.optimize()
+    # Retrieve results
+    assignment_matrix = np.zeros((total_bs, total_mn))
+    max_throughput = 0
+    if model.status == GRB.OPTIMAL:
+        for i in range(total_bs):
+            for j in range(total_mn):
+                assignment_matrix[i, j] = a[i, j].X  # Extract binary values
+    # Get the optimized throughput (objective function value)
+    max_throughput = model.objVal
+
+    return assignment_matrix, max_throughput
 
 # Process all mobility datasets
 
@@ -138,7 +181,10 @@ def process_all_datasets():
         sinr = compute_sinr(channel_gain, P_BS, NOISE_POWER)
 
         # Optimize throughput
-        optimize_throughput()
+        best_assignment, max_throughput = optimize_throughput(
+            bs_positions, mn_positions, sinr)
+        print("Optimized Assignment Matrix 👇 \n", best_assignment)
+        print("max throughput: ", max_throughput)
 
     print("Processing Complete.")
 
