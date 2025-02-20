@@ -4,7 +4,7 @@
 import os
 import numpy as np
 import pandas as pd
-import tensorflow as tf
+# import tensorflow as tf
 from sionna.channel.tr38901 import TDL
 from sionna.ofdm import ResourceGrid
 from sionna.channel import OFDMChannel
@@ -21,11 +21,9 @@ BANDWIDTH = 20e6  # Channel bandwidth (20 MHz)
 OFDM_SYMBOLS = 14  # Number of OFDM symbols per frame
 FFT_SIZE = 64  # Number of subcarriers
 SUBCARRIER_SPACING = 15e3  # Subcarrier spacing in Hz
-DATASET_PATH = "mnt/data"
+DATASET_PATH = "database"
 
 # Load base station locations
-
-
 def load_base_stations(file_path):
     """Load base station locations from a CSV file."""
     print(f"Loading base station locations from {file_path}")
@@ -33,8 +31,6 @@ def load_base_stations(file_path):
     return df.values
 
 # Load mobility data
-
-
 def load_mobility_data(file_path):
     """Load mobility data from a CSV file."""
     print(f"Loading mobility data from {file_path}")
@@ -57,37 +53,36 @@ channel = OFDMChannel(
 )
 
 # Compute channel gains
-
-
 def compute_channel_gain(bs_positions, mn_positions):
     """Compute channel gains based on distance, path loss, fading, and shadowing."""
     print("Computing channel gains...")
-    # shape[0] gives the number of rows, which is the number of base stations
     total_bs = bs_positions.shape[0]
-    # Number of mobile nodes
     total_mn = mn_positions.shape[0]
     channel_gains = np.zeros((total_bs, total_mn))
 
-    for i in range(total_bs):
-        for j in range(total_mn):
-            # Calculate distance between BS and MN
-            distance = np.linalg.norm(bs_positions[i] - mn_positions[j])
+    # Calculate distance between BS and MN
+    distances = np.linalg.norm(
+        bs_positions[:, np.newaxis, :] - mn_positions[np.newaxis, :, :], axis=-1)
 
-            # Compute path loss using log-distance path loss model
-            path_loss = 20 * np.log10(distance) + 20 * np.log10(CARRIER_FREQ)
+    # Compute path loss using log-distance path loss model
+    path_loss = 20 * np.log10(distances) + 20 * np.log10(CARRIER_FREQ) - 147.55
 
-            # Apply fading (Rayleigh fading)
-            # scale=1.0 is a standard Rayleigh distribution
-            fading = np.random.rayleigh(scale=1.0, size=(total_bs, total_mn))
+    # Apply fading (Rayleigh fading)
+    fading = 10 * np.log10(np.random.rayleigh(scale=1.0, size=(total_bs, total_mn)))
 
-            # Apply shadowing (log-normal shadowing)
-            # scale=2.0 is a reasonable empirical choice.
-            shadowing = np.random.normal(
-                loc=0.0, scale=2.0, size=(total_bs, total_mn))
+    # Apply shadowing (log-normal shadowing)
+    shadowing = np.random.normal(loc=0.0, scale=2.0, size=(total_bs, total_mn))
 
-            # Compute channel gain
-            # 10 * np.log10(fading) converts fading to dB
-            channel_gains[i, j] = -path_loss + fading + shadowing
+    print("path_loss: ", path_loss)
+    print("fading: ", fading)
+    print("shadowing: ", shadowing)
+
+    # Compute channel gain
+    channel_gains = -path_loss + fading + shadowing
+
+
+    # TODO: 
+    print("channel_gain: ", channel_gains)
 
     return channel_gains
 
@@ -102,18 +97,15 @@ def compute_sinr(channel_gain, power_bs, noise_power):
 
     for j in range(total_mn):
         for i in range(total_bs):
-            # Calculate signal power for each MN from assigned BS
-            signal_power = power_bs * channel_gain[i, j]
+            # Calculate signal power for each MN from assigned BS(linear)
+            signal_power = power_bs * 10 ** (channel_gain[i, j] / 10)
             # Compute interference power from other BSs
-            interference_power = np.sum(
-                [power_bs * channel_gain[k, j] for k in range(total_bs) if k != i])
-            # Calculate SINR for each MN-BS pair
-            sinr[i, j] = signal_power / (noise_power + interference_power)
-
+            interference_power = np.sum([power_bs * 10 ** (channel_gain[k, j] / 10) for k in range(total_bs) if k != i])
+            # calculate SINR 
+            sinr[i][j] = signal_power / (noise_power + interference_power)
     return sinr
 
 # Optimization Problem using Gurobi
-
 
 def optimize_throughput(bs_positions, mn_positions, sinr):
     """Formulate and solve an optimization problem to maximize throughput."""
@@ -160,7 +152,6 @@ def optimize_throughput(bs_positions, mn_positions, sinr):
 
 # Process all mobility datasets
 
-
 def process_all_datasets():
     """Load datasets, compute channel gains, compute SINR, and optimize throughput."""
     print("Processing all datasets...")
@@ -173,12 +164,12 @@ def process_all_datasets():
         print(f"Processing {file}")
         mobility_data = load_mobility_data(os.path.join(DATASET_PATH, file))
         mn_positions = mobility_data[['x', 'y']].values
-
         # Compute channel gains
         channel_gain = compute_channel_gain(bs_positions, mn_positions)
 
         # Compute SINR
         sinr = compute_sinr(channel_gain, P_BS, NOISE_POWER)
+        print("SINR Matrix:\n", sinr)
 
         # Optimize throughput
         best_assignment, max_throughput = optimize_throughput(
