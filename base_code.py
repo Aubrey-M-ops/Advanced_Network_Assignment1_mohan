@@ -37,7 +37,6 @@ def load_mobility_data(file_path):
     df = pd.read_csv(file_path)
     return df
 
-
 # Initialize Sionna OFDM Channel Model
 print("Initializing Sionna OFDM Channel Model...")
 tdl_model = TDL(model="A", delay_spread=100e-9, carrier_frequency=CARRIER_FREQ)
@@ -63,32 +62,18 @@ def compute_channel_gain(bs_positions, mn_positions):
     # Calculate distance between BS and MN
     distances = np.linalg.norm(
         bs_positions[:, np.newaxis, :] - mn_positions[np.newaxis, :, :], axis=-1)
-
     # Compute path loss using log-distance path loss model
-    path_loss = 20 * np.log10(distances) + 20 * np.log10(CARRIER_FREQ) - 147.55
-
+    path_loss =10 * np.log10(distances**4 + 1e-9)
     # Apply fading (Rayleigh fading)
-    fading = 10 * np.log10(np.random.rayleigh(scale=1.0, size=(total_bs, total_mn)))
-
+    fading = np.random.rayleigh(scale=1.0, size=(total_bs, total_mn))
     # Apply shadowing (log-normal shadowing)
-    shadowing = np.random.normal(loc=0.0, scale=2.0, size=(total_bs, total_mn))
-
-    print("path_loss: ", path_loss)
-    print("fading: ", fading)
-    print("shadowing: ", shadowing)
-
+    shadowing = np.random.normal(loc=0, scale=2, size=(total_bs, total_mn))
     # Compute channel gain
-    channel_gains = -path_loss + fading + shadowing
-
-
-    # TODO: 
-    print("channel_gain: ", channel_gains)
+    channel_gains = 10**((-path_loss + shadowing + fading) / 10)
 
     return channel_gains
 
 # Compute SINR values
-
-
 def compute_sinr(channel_gain, power_bs, noise_power):
     """Compute SINR based on received signal power, interference, and noise."""
     print("Computing SINR...")
@@ -98,15 +83,15 @@ def compute_sinr(channel_gain, power_bs, noise_power):
     for j in range(total_mn):
         for i in range(total_bs):
             # Calculate signal power for each MN from assigned BS(linear)
-            signal_power = power_bs * 10 ** (channel_gain[i, j] / 10)
+            signal_power = power_bs * channel_gain[i, j] 
             # Compute interference power from other BSs
-            interference_power = np.sum([power_bs * 10 ** (channel_gain[k, j] / 10) for k in range(total_bs) if k != i])
+            interference_power = np.sum([power_bs * channel_gain[k, j] for k in range(total_bs) if k != i])
             # calculate SINR 
             sinr[i][j] = signal_power / (noise_power + interference_power)
+            sinr[i][j] = np.maximum(sinr[i][j], 1e-6)
     return sinr
 
 # Optimization Problem using Gurobi
-
 def optimize_throughput(bs_positions, mn_positions, sinr):
     """Formulate and solve an optimization problem to maximize throughput."""
     print("Setting up optimization problem...")
@@ -116,7 +101,6 @@ def optimize_throughput(bs_positions, mn_positions, sinr):
     # 1️⃣ Define decision variables
     # Create a 2D matrix of binary variables a[i, j] for assignment
     a = model.addVars(total_bs, total_mn, vtype=GRB.BINARY, name="a")
-
     # 2️⃣ Define constraints (assignment, SINR constraints, binary constraints)
     # Constraint 1 (assignment): Each mobile node can only be assigned to one base station
     for j in range(total_mn):
@@ -129,7 +113,6 @@ def optimize_throughput(bs_positions, mn_positions, sinr):
                             name=f"SINR_constraint_{i}_{j}")
     # Constraint 3(Binary constraint): Association variable must be binary (0 or 1)
     # This is handled implicitly by vtype=GRB.BINARY
-
     # 3️⃣ Set the objective function
     model.setObjective(
         gp.quicksum(a[i, j] * np.log2(1 + sinr[i, j])
@@ -161,14 +144,16 @@ def process_all_datasets():
         DATASET_PATH) if f.startswith("mobility_data_t") and f.endswith(".csv")])
 
     for file in mobility_files:
-        print(f"Processing {file}")
+        print(f"Processing {file}👉👉👉👉👉👉👉👉")
         mobility_data = load_mobility_data(os.path.join(DATASET_PATH, file))
         mn_positions = mobility_data[['x', 'y']].values
         # Compute channel gains
         channel_gain = compute_channel_gain(bs_positions, mn_positions)
-
         # Compute SINR
         sinr = compute_sinr(channel_gain, P_BS, NOISE_POWER)
+        # FIXME: transfer to number
+        np.set_printoptions(suppress=True, precision=6)
+        print("Channel Gain Matrix:\n", channel_gain)
         print("SINR Matrix:\n", sinr)
 
         # Optimize throughput
