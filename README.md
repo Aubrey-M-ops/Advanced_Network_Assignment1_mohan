@@ -1,5 +1,11 @@
 # Assignment1 - Report
 
+## Result
+
+| mobility_data_t0.csv                                         | mobility_data_t1.csv                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| ![image-20250312215620364](./imgs/result1.png) | ![image-20250312220318008](./imgs/result2.png) |
+
 ## 1. How base station and mobility data are loaded
 
 1. Read CSV files
@@ -29,7 +35,7 @@
    ```python
     mobility_files = sorted([f for f in os.listdir(
            DATASET_PATH) if f.startswith("mobility_data_t") and f.endswith(".csv")])
-
+   
    for file in mobility_files:
      xxx
      xxx
@@ -85,7 +91,7 @@ There are 3 factors affecting channel gain：`path loss`, `Fading`, `Shadowing`.
     # scale=2.0 means the standard deviation of the normal distribution is 2.
     ```
 
-​ Eventually computing "Channel Gain" is based on
+ Eventually computing "Channel Gain" is based on
 
 $$
 ChannelGain=−PathLoss+Fading+Shadowing
