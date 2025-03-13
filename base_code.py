@@ -107,9 +107,11 @@ def optimize_throughput(bs_positions, mn_positions, sinr):
         model.addConstr(gp.quicksum(a[i, j] for i in range(
             total_bs)) == 1, name=f"assign_mn_{j}")
     # Constraint 2(SINR constraint): Ensure assigned mobile nodes meet the minimum SINR threshold
+    M = float(np.max(sinr))
     for i in range(total_bs):
         for j in range(total_mn):
-            model.addConstr(a[i, j] * sinr[i, j] >= SINR_MIN,
+            if sinr[i, j] >= SINR_MIN:
+                model.addConstr(sinr[i,j] + M * (1-a[i,j]) >= SINR_MIN,
                             name=f"SINR_constraint_{i}_{j}")
     # Constraint 3(Binary constraint): Association variable must be binary (0 or 1)
     # This is handled implicitly by vtype=GRB.BINARY
@@ -121,6 +123,7 @@ def optimize_throughput(bs_positions, mn_positions, sinr):
     )
     # 4️⃣ Solve the optimization problem
     model.optimize()
+    print("Optimization method:", model.getParamInfo("Method"))
     # Retrieve results
     assignment_matrix = np.zeros((total_bs, total_mn))
     max_throughput = 0
@@ -151,8 +154,6 @@ def process_all_datasets():
         channel_gain = compute_channel_gain(bs_positions, mn_positions)
         # Compute SINR
         sinr = compute_sinr(channel_gain, P_BS, NOISE_POWER)
-        # FIXME: transfer to number
-        np.set_printoptions(suppress=True, precision=6)
         print("Channel Gain Matrix:\n", channel_gain)
         print("SINR Matrix:\n", sinr)
 
